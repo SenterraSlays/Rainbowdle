@@ -74,6 +74,11 @@ document.addEventListener("DOMContentLoaded", () => {
         mpLobbyStatus: document.getElementById("mp-lobby-status"),
         mpLeaveBtn: document.getElementById("mp-leave-btn"),
         mpStartBtn: document.getElementById("mp-start-btn"),
+
+        mpResults: document.getElementById("mp-results"),
+        mpResultsReveal: document.getElementById("mp-results-reveal"),
+        mpResultsList: document.getElementById("mp-results-list"),
+        mpResultsNextHint: document.getElementById("mp-results-next-hint"),
     };
 
     function openModal(modal) {
@@ -421,6 +426,7 @@ document.addEventListener("DOMContentLoaded", () => {
         status: "playing",
         mysteryOperator: { name: "???", image: "pngs/recruit_blue.png" },
         _roomId: null,
+        _roundStartedAt: null,
         findOperatorByName: findOperator,
         getAvailableHints() {
             return HINT_SCHEDULE.map((entry) => {
@@ -441,18 +447,19 @@ document.addEventListener("DOMContentLoaded", () => {
         mpAdapter.status = "playing";
         mpAdapter.mysteryOperator = { name: "???", image: "pngs/recruit_blue.png" };
         mpAdapter._roomId = mp.room ? mp.room.id : null;
+        mpAdapter._roundStartedAt = mp.room ? mp.room.round_started_at : null;
         mpHintValues = { secondaryGadgets: null, secondaryWeapons: null, primaryWeapons: null };
     }
 
     function mpEnterGameScreen() {
         if (!ui || !mp.room) return;
         mpGameEntered = true;
-        // Only carry guesses over when re-entering the SAME room's round
-        // (e.g. reopening the multiplayer menu mid-round). A different
-        // room -- a brand new game after finishing/leaving one -- must
+        // Only carry guesses over when re-entering the SAME room's SAME
+        // round (e.g. reopening the multiplayer menu mid-round). A
+        // different room, or a new round in the same room (rematch), must
         // always start from a clean slate, otherwise old guesses/duplicate
         // names and a stale won/lost status leak in and block guessing.
-        if (mpAdapter._roomId !== mp.room.id) mpResetAdapter();
+        if (mpAdapter._roomId !== mp.room.id || mpAdapter._roundStartedAt !== mp.room.round_started_at) mpResetAdapter();
         ui.onMultiplayerGuessSubmit = mpSubmitGuess;
         ui.onMultiplayerLeaveRequested = mpLeaveFromGameScreen;
         ui.enterMultiplayerMode(mpAdapter);
@@ -469,7 +476,10 @@ document.addEventListener("DOMContentLoaded", () => {
         mpPollTimer = setInterval(async () => {
             if (!mpGameEntered || !mp.room) return;
             await Promise.all([mp._refreshPlayers(), mp._refreshGuesses()]);
-            mpRenderSidebar(mp._snapshot());
+            const snapshot = mp._snapshot();
+            mpRenderSidebar(snapshot);
+            renderRoundResults(snapshot);
+            mpMaybeScheduleRestart(snapshot);
         }, 4000);
     }
     function mpStopPolling() {
@@ -517,6 +527,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function mpLeaveFromGameScreen() {
         mpStopPolling();
+        if (mpRestartTimer) {
+            clearTimeout(mpRestartTimer);
+            mpRestartTimer = null;
+        }
         await mp.leaveRoom();
         mpGameEntered = false;
         mpResetAdapter();
@@ -557,22 +571,67 @@ document.addEventListener("DOMContentLoaded", () => {
         el.mpLobbyStatus.textContent = snapshot.isHost ? "You are the host. Start when ready." : "Waiting for host…";
     }
 
+    // --- End-of-round results + auto-rematch ------------------------
+    function renderRoundResults(snapshot) {
+        const results = snapshot.results;
+        if (!el.mpResults) return;
+        if (!results || !results.allFinished) {
+            el.mpResults.hidden = true;
+            return;
+        }
+        el.mpResults.hidden = false;
+        el.mpResultsReveal.textContent = results.mysteryOperatorName ? `The operator was ${results.mysteryOperatorName}.` : "";
+        el.mpResultsList.innerHTML = (results.players || [])
+            .map((p, i) => {
+                const line = p.solved ? `✅ Solved in ${p.guesses_count}` : "❌ Did not solve";
+                return `<div class="mp-result-row"><strong>${i + 1}. ${escapeHtml(p.username)}</strong><br /><span>${line}</span></div>`;
+            })
+            .join("");
+        el.mpResultsNextHint.textContent = snapshot.isHost
+            ? "Everyone's finished — starting a new round…"
+            : "Everyone's finished — waiting for the host to start the next round…";
+    }
+
+    let mpRestartTimer = null;
+    function mpMaybeScheduleRestart(snapshot) {
+        const shouldSchedule = snapshot.isHost && snapshot.room && snapshot.room.status === "playing" && snapshot.results && snapshot.results.allFinished;
+        if (shouldSchedule) {
+            if (!mpRestartTimer) {
+                mpRestartTimer = setTimeout(async () => {
+                    mpRestartTimer = null;
+                    if (mp.room && mp.room.status === "playing") {
+                        const result = await mp.startNewRound();
+                        if (result.error) console.error("Rainbowdle auto-rematch failed", result.error);
+                    }
+                }, 3000);
+            }
+        } else if (mpRestartTimer) {
+            clearTimeout(mpRestartTimer);
+            mpRestartTimer = null;
+        }
+    }
+
     mp.onChange((snapshot) => {
         if (!snapshot.room) return;
 
         if (snapshot.room.status === "lobby") {
             mpGameEntered = false;
+            mpMaybeScheduleRestart(snapshot);
             renderLobby(snapshot);
             if (el.multiplayerModal.classList.contains("is-open")) mpShowView("lobby");
         } else if (snapshot.room.status === "playing") {
-            if (!mpGameEntered) {
+            const isNewRound = mpAdapter._roomId !== snapshot.room.id || mpAdapter._roundStartedAt !== snapshot.room.round_started_at;
+            if (!mpGameEntered || isNewRound) {
                 closeModal(el.multiplayerModal);
                 mpEnterGameScreen();
             }
             mpRenderSidebar(snapshot);
+            renderRoundResults(snapshot);
+            mpMaybeScheduleRestart(snapshot);
         } else if (snapshot.room.status === "closed") {
             mpGameEntered = false;
             mpStopPolling();
+            mpMaybeScheduleRestart({ ...snapshot, results: null });
             mpResetAdapter();
             if (ui && ui.multiplayerActive) ui.exitMultiplayerMode();
             mpShowView("menu");

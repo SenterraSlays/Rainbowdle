@@ -131,6 +131,19 @@ class RainbowdleMultiplayer {
             .eq("id", this.room.id)
             .maybeSingle();
         if (roomRow) this.room = roomRow;
+
+        // Keep `results` (standings + revealed operator) in sync with
+        // whether the whole room has finished the current round, so every
+        // client -- not just whoever happened to finish last -- sees the
+        // results panel and, for the host, can trigger the next round.
+        const allFinished = this.room && this.room.status === "playing" && this.players.length > 0 && this.players.every((p) => p.finished);
+        if (allFinished) {
+            if (!this.results || !this.results.allFinished) {
+                await this.refreshResults();
+            }
+        } else if (this.results) {
+            this.results = null;
+        }
     }
 
     _subscribeRealtime() {
@@ -243,6 +256,16 @@ class RainbowdleMultiplayer {
         this.results = data;
         this._emit();
         return data;
+    }
+
+    async startNewRound() {
+        if (!this.room) return { error: "Not in a room." };
+        const { data, error } = await this.client.rpc("start_new_round", { p_room_id: this.room.id });
+        if (error) return { error: error.message };
+        this.room = data;
+        this.results = null;
+        this._emit();
+        return { data };
     }
 
     async leaveRoom() {

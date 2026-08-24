@@ -214,9 +214,11 @@ class RainbowdleUI {
         }
     }
     _startMode(mode) {
-        const dailySnap = mode === "daily" ? RainbowdleStorage.loadGameState("daily") : null;
-        const dailyAlreadyDone = dailySnap && dailySnap.dateKey === RainbowdleGame.todayKey() && dailySnap.status !== "playing";
-        const resumed = !dailyAlreadyDone && this._restoreMode(mode);
+        // If today's daily has already been completed, always reopen that
+        // finished game (read-only end state) instead of generating a new
+        // one -- resetting here would let the player replay the same
+        // day's puzzle over and over.
+        const resumed = this._restoreMode(mode);
         if (!resumed) {
             this.game.reset(mode);
             this._persistGame();

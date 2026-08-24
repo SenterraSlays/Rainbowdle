@@ -229,8 +229,155 @@ class RainbowdleUI {
         this.render();
     }
     _goHome() {
+        if (this.multiplayerActive) {
+            this._leaveMultiplayerGame();
+            return;
+        }
         this._persistGame();
         this._showMenu();
+    }
+    // --- Multiplayer: reuses every singleplayer render/DOM code path by
+    // temporarily swapping `this.game` for a lightweight adapter object
+    // that exposes the same shape (guesses/status/mysteryOperator/
+    // getAvailableHints/findOperatorByName). All the actual networking
+    // lives in online-ui.js -- this class only knows how to render
+    // whatever's in `this.game` and forward guess/leave intents outward
+    // via the two callback hooks below.
+    enterMultiplayerMode(adapter) {
+        this._savedGame = this.game;
+        this.game = adapter;
+        this.multiplayerActive = true;
+        this._lastAnnouncedHints = new Set;
+        this.expandedHintField = null;
+        this.el.searchInput.value = "";
+        this._setFeedback("");
+        this._closeAutocomplete();
+        this.el.mainMenu.hidden = true;
+        this.el.app.hidden = false;
+        this.el.learnScreen.hidden = true;
+        this.el.stickyHeader.style.removeProperty("display");
+        this.el.modeEyebrow.textContent = `Multiplayer · Room ${adapter.roomCode || ""}`.trim();
+        this.el.homeBtn.hidden = false;
+        this.el.newGameBtn.style.display = "none";
+        this.el.newGameBtnTop.style.display = "none";
+        this.el.mpSidebar.hidden = false;
+        this.el.mpSidebarCode.textContent = adapter.roomCode || "";
+        this.render();
+    }
+    exitMultiplayerMode() {
+        this.multiplayerActive = false;
+        this.game = this._savedGame || this.game;
+        this.el.mpSidebar.hidden = true;
+        this.el.newGameBtn.style.removeProperty("display");
+        this.el.newGameBtnTop.style.removeProperty("display");
+        this._showMenu();
+    }
+    _leaveMultiplayerGame() {
+        if (typeof this.onMultiplayerLeaveRequested === "function") {
+            this.onMultiplayerLeaveRequested();
+        } else {
+            this.exitMultiplayerMode();
+        }
+    }
+    _handleMultiplayerGuessSubmit() {
+        const rawValue = this.el.searchInput.value.trim();
+        if (!rawValue) {
+            this._setFeedback("ENTER AN OPERATOR NAME");
+            return;
+        }
+        if (this.game.status !== "playing") {
+            this._setFeedback("ROUND OVER — WAITING ON OTHER PLAYERS");
+            return;
+        }
+        const matched = this.game.findOperatorByName(rawValue);
+        if (!matched) {
+            this._setFeedback(`"${rawValue}" IS NOT A RECOGNIZED OPERATOR`);
+            return;
+        }
+        if (this.game.guessedNames.has(matched.name)) {
+            this._setFeedback(`You already guessed ${matched.name}!`);
+            return;
+        }
+        if (typeof this.onMultiplayerGuessSubmit === "function") {
+            this.onMultiplayerGuessSubmit(matched.name);
+        }
+    }
+    renderMultiplayerGuessResult(won) {
+        // Called by online-ui.js right after it pushes a new guess into the
+        // adapter, so the shared render pipeline picks it up exactly like a
+        // singleplayer guess would.
+        this._setFeedback("");
+        this.el.searchInput.value = "";
+        this.selectedOperatorName = null;
+        this._closeAutocomplete();
+        this.render({ animateLastGuess: true });
+        if (this.game.status !== "playing") {
+            this._playSound(won ? "win" : "lose");
+        } else if (won === false) {
+            this._playSound("incorrect");
+        }
+    }
+    setMultiplayerGuessError(message) {
+        this._setFeedback(message || "");
+    }
+    renderMultiplayerSidebar({ statusText, players }) {
+        if (this.el.mpSidebarStatus) this.el.mpSidebarStatus.textContent = statusText || "";
+        const wrap = this.el.mpSidebarPlayers;
+        if (!wrap) return;
+        wrap.innerHTML = "";
+        for (const p of players) {
+            const card = document.createElement("div");
+            card.className = "mp-player-card" + (p.isMe ? " mp-player-card--me" : "") + (p.offline ? " mp-player-card--gone" : "");
+
+            const head = document.createElement("div");
+            head.className = "mp-player-card__head";
+            const dot = document.createElement("span");
+            dot.className = "mp-player-card__dot" + (p.offline ? " mp-player-card__dot--offline" : "");
+            head.appendChild(dot);
+            const name = document.createElement("span");
+            name.className = "mp-player-card__name";
+            name.textContent = p.isMe ? `${p.username} (you)` : p.username;
+            head.appendChild(name);
+            if (p.isHost) {
+                const badge = document.createElement("span");
+                badge.className = "mp-player-card__badge";
+                badge.textContent = "host";
+                head.appendChild(badge);
+            }
+            card.appendChild(head);
+
+            const grid = document.createElement("div");
+            grid.className = "mp-player-card__grid";
+            if (!p.guessRows || !p.guessRows.length) {
+                const empty = document.createElement("div");
+                empty.className = "mp-player-card__empty";
+                empty.textContent = "No guesses yet…";
+                grid.appendChild(empty);
+            } else {
+                for (const states of p.guessRows) {
+                    const row = document.createElement("div");
+                    row.className = "mp-player-card__row";
+                    for (const state of states) {
+                        const sq = document.createElement("span");
+                        sq.className = `share-square share-square--${state}`;
+                        row.appendChild(sq);
+                    }
+                    grid.appendChild(row);
+                }
+            }
+            card.appendChild(grid);
+
+            const status = document.createElement("div");
+            status.className = "mp-player-card__status";
+            status.textContent = p.solved
+                ? `✅ Solved in ${p.guessCount}`
+                : p.finished
+                ? "❌ Did not solve it"
+                : `${p.guessCount} / 10 guesses`;
+            card.appendChild(status);
+
+            wrap.appendChild(card);
+        }
     }
     _showLearn() {
         this.el.mainMenu.hidden = true;
@@ -599,6 +746,11 @@ class RainbowdleUI {
         this.el = {
             app: document.getElementById("app"),
             mainMenu: document.getElementById("main-menu"),
+            mpSidebar: document.getElementById("mp-sidebar"),
+            mpSidebarCode: document.getElementById("mp-sidebar-code"),
+            mpSidebarStatus: document.getElementById("mp-sidebar-status"),
+            mpSidebarPlayers: document.getElementById("mp-sidebar-players"),
+            mpSidebarLeaveBtn: document.getElementById("mp-sidebar-leave-btn"),
             modeEyebrow: document.getElementById("mode-eyebrow"),
             homeBtn: document.getElementById("home-btn"),
             stickyHomeBtn: document.getElementById("sticky-home-btn"),
@@ -705,6 +857,7 @@ class RainbowdleUI {
         this.el.modeLearnBtn.addEventListener("click", () => this._showLearn());
         this.el.homeBtn.addEventListener("click", () => this._goHome());
         this.el.stickyHomeBtn.addEventListener("click", () => this._goHome());
+        this.el.mpSidebarLeaveBtn.addEventListener("click", () => this._leaveMultiplayerGame());
         this.el.menuOperatorsBtn.addEventListener("click", () => this._openModal(this.el.operatorsModal, this.el.operatorsSearch));
         this.el.menuStatsBtn.addEventListener("click", () => {
             this._renderStats();
@@ -1015,6 +1168,10 @@ class RainbowdleUI {
         }
     }
     _handleGuessSubmit() {
+        if (this.multiplayerActive) {
+            this._handleMultiplayerGuessSubmit();
+            return;
+        }
         const rawValue = this.el.searchInput.value.trim();
         if (!rawValue) {
             this._setFeedback("ENTER AN OPERATOR NAME");
@@ -1060,6 +1217,7 @@ class RainbowdleUI {
         this.el.searchFeedback.textContent = message;
     }
     _requestNewGame() {
+        if (this.multiplayerActive) return;
         if (this.game.mode === "daily") {
             this._goHome();
             return;
@@ -1084,7 +1242,7 @@ class RainbowdleUI {
     _shareOutcomeLabel() {
         const total = this.game.guesses.length;
         const outcome = this.game.status === "won" ? `${total}/${MAX_GUESSES}` : `X/${MAX_GUESSES}`;
-        const modeLabel = this.game.mode === "daily" ? `Daily · ${this.game.dateKey}` : "Classic";
+        const modeLabel = this.game.mode === "daily" ? `Daily · ${this.game.dateKey}` : this.game.mode === "multiplayer" ? `Multiplayer · Room ${this.game.roomCode || ""}`.trim() : "Classic";
         return `${outcome} — ${modeLabel}`;
     }
     _buildShareText() {

@@ -45,8 +45,24 @@ document.addEventListener("DOMContentLoaded", () => {
         mpCreateBtn: document.getElementById("mp-create-btn"),
         mpJoinOpenBtn: document.getElementById("mp-join-open-btn"),
 
+        mpViewCreate: document.getElementById("mp-view-create"),
+        mpCreateMaxPlayers: document.getElementById("mp-create-max-players"),
+        mpCreateVisibilityInputs: Array.from(document.querySelectorAll('input[name="mp-create-visibility"]')),
+        mpCreatePasswordRow: document.getElementById("mp-create-password-row"),
+        mpCreatePassword: document.getElementById("mp-create-password"),
+        mpCreateError: document.getElementById("mp-create-error"),
+        mpCreateBackBtn: document.getElementById("mp-create-back-btn"),
+        mpCreateSubmitBtn: document.getElementById("mp-create-submit-btn"),
+
+        mpViewLobbylist: document.getElementById("mp-view-lobbylist"),
+        mpLobbylistBody: document.getElementById("mp-lobbylist-body"),
+        mpLobbylistRefreshBtn: document.getElementById("mp-lobbylist-refresh-btn"),
+        mpLobbylistBackBtn: document.getElementById("mp-lobbylist-back-btn"),
+        mpLobbylistCodeBtn: document.getElementById("mp-lobbylist-code-btn"),
+
         mpViewJoin: document.getElementById("mp-view-join"),
         mpJoinCode: document.getElementById("mp-join-code"),
+        mpJoinPassword: document.getElementById("mp-join-password"),
         mpJoinError: document.getElementById("mp-join-error"),
         mpJoinBackBtn: document.getElementById("mp-join-back-btn"),
         mpJoinSubmitBtn: document.getElementById("mp-join-submit-btn"),
@@ -58,21 +74,6 @@ document.addEventListener("DOMContentLoaded", () => {
         mpLobbyStatus: document.getElementById("mp-lobby-status"),
         mpLeaveBtn: document.getElementById("mp-leave-btn"),
         mpStartBtn: document.getElementById("mp-start-btn"),
-
-        mpViewGame: document.getElementById("mp-view-game"),
-        mpGameProgress: document.getElementById("mp-game-progress"),
-        mpOperatorSearch: document.getElementById("mp-operator-search"),
-        mpAutocompleteList: document.getElementById("mp-autocomplete-list"),
-        mpGuessBtn: document.getElementById("mp-guess-btn"),
-        mpSearchFeedback: document.getElementById("mp-search-feedback"),
-        mpHintPanel: document.getElementById("mp-hint-panel"),
-        mpGridBody: document.getElementById("mp-grid-body"),
-        mpEndBanner: document.getElementById("mp-end-banner"),
-
-        mpViewResults: document.getElementById("mp-view-results"),
-        mpResultsOperator: document.getElementById("mp-results-operator"),
-        mpResultsList: document.getElementById("mp-results-list"),
-        mpResultsLeaveBtn: document.getElementById("mp-results-leave-btn"),
     };
 
     function openModal(modal) {
@@ -223,13 +224,13 @@ document.addEventListener("DOMContentLoaded", () => {
     el.leaderboardClose.addEventListener("click", () => closeModal(el.leaderboardModal));
 
     function mpShowView(name) {
-        [el.mpViewMenu, el.mpViewJoin, el.mpViewLobby, el.mpViewGame, el.mpViewResults].forEach((v) => (v.hidden = true));
+        [el.mpViewMenu, el.mpViewCreate, el.mpViewLobbylist, el.mpViewJoin, el.mpViewLobby].forEach((v) => (v.hidden = true));
         ({
             menu: el.mpViewMenu,
+            create: el.mpViewCreate,
+            lobbylist: el.mpViewLobbylist,
             join: el.mpViewJoin,
             lobby: el.mpViewLobby,
-            game: el.mpViewGame,
-            results: el.mpViewResults,
         }[name].hidden = false);
     }
 
@@ -239,14 +240,117 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
             el.mpSignedOutHint.hidden = true;
         }
-        mpShowView(mp.room ? "lobby" : "menu");
-        openModal(el.multiplayerModal);
+        if (mp.room && mp.room.status === "playing") {
+            // Already mid-round -- jump straight back into the shared game
+            // screen instead of showing the lobby.
+            closeModal(el.multiplayerModal);
+            mpEnterGameScreen();
+        } else {
+            mpShowView(mp.room ? "lobby" : "menu");
+            openModal(el.multiplayerModal);
+        }
     });
     el.multiplayerClose.addEventListener("click", () => closeModal(el.multiplayerModal));
 
-    el.mpCreateBtn.addEventListener("click", async () => {
+    // --- Create Room ------------------------------------------------
+    el.mpCreateBtn.addEventListener("click", () => {
         if (!auth.isLoggedIn) return;
-        const result = await mp.createRoom(8);
+        el.mpCreateError.hidden = true;
+        el.mpCreatePassword.value = "";
+        el.mpCreateMaxPlayers.value = "6";
+        el.mpCreateVisibilityInputs.forEach((r) => (r.checked = r.value === "public"));
+        el.mpCreatePasswordRow.hidden = true;
+        mpShowView("create");
+    });
+
+    el.mpCreateVisibilityInputs.forEach((radio) => {
+        radio.addEventListener("change", () => {
+            const visibility = el.mpCreateVisibilityInputs.find((r) => r.checked)?.value || "public";
+            el.mpCreatePasswordRow.hidden = visibility !== "private";
+        });
+    });
+
+    el.mpCreateBackBtn.addEventListener("click", () => mpShowView("menu"));
+
+    el.mpCreateSubmitBtn.addEventListener("click", async () => {
+        el.mpCreateError.hidden = true;
+        const maxPlayers = parseInt(el.mpCreateMaxPlayers.value, 10);
+        const visibility = el.mpCreateVisibilityInputs.find((r) => r.checked)?.value || "public";
+        const password = el.mpCreatePassword.value.trim();
+
+        if (visibility === "private" && !password) {
+            el.mpCreateError.textContent = "Private rooms need a password.";
+            el.mpCreateError.hidden = false;
+            return;
+        }
+
+        el.mpCreateSubmitBtn.disabled = true;
+        const result = await mp.createRoom(maxPlayers, visibility, visibility === "private" ? password : null);
+        el.mpCreateSubmitBtn.disabled = false;
+
+        if (result.error) {
+            el.mpCreateError.textContent = result.error;
+            el.mpCreateError.hidden = false;
+            return;
+        }
+        mpShowView("lobby");
+    });
+
+    // --- Join Room (lobby list of open rooms) ------------------------
+    async function mpRefreshLobbyList() {
+        el.mpLobbylistBody.innerHTML = `<p class="mp-lobbylist__empty">Loading rooms…</p>`;
+        const { rows, error } = await mp.listOpenRooms();
+        if (error) {
+            el.mpLobbylistBody.innerHTML = `<p class="mp-lobbylist__empty">${escapeHtml(error)}</p>`;
+            return;
+        }
+        if (!rows.length) {
+            el.mpLobbylistBody.innerHTML = `<p class="mp-lobbylist__empty">No open rooms right now. Create one!</p>`;
+            return;
+        }
+        el.mpLobbylistBody.innerHTML = rows
+            .map((r) => {
+                const lock = r.visibility === "private" ? "🔒" : "🌐";
+                return `<div class="mp-lobby-row">
+                    <div class="mp-lobby-row__info">
+                        <span class="mp-lobby-row__name">${lock} ${escapeHtml(r.host_username)}'s room · <code>${escapeHtml(r.code)}</code></span>
+                        <span class="mp-lobby-row__meta">${r.player_count}/${r.max_players} players${r.visibility === "private" ? " · needs password" : ""}</span>
+                    </div>
+                    <button class="secondary-btn mp-lobby-row__join" type="button" data-code="${escapeHtml(r.code)}" data-visibility="${escapeHtml(r.visibility)}">Join</button>
+                </div>`;
+            })
+            .join("");
+    }
+
+    el.mpJoinOpenBtn.addEventListener("click", () => {
+        if (!auth.isLoggedIn) return;
+        mpShowView("lobbylist");
+        mpRefreshLobbyList();
+    });
+    el.mpLobbylistRefreshBtn.addEventListener("click", () => mpRefreshLobbyList());
+    el.mpLobbylistBackBtn.addEventListener("click", () => mpShowView("menu"));
+    el.mpLobbylistCodeBtn.addEventListener("click", () => {
+        el.mpJoinError.hidden = true;
+        el.mpJoinCode.value = "";
+        el.mpJoinPassword.value = "";
+        mpShowView("join");
+    });
+
+    el.mpLobbylistBody.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".mp-lobby-row__join");
+        if (!btn) return;
+        const code = btn.dataset.code;
+        if (btn.dataset.visibility === "private") {
+            // Needs a password -- send them to the code/password form, prefilled.
+            el.mpJoinError.hidden = true;
+            el.mpJoinCode.value = code;
+            el.mpJoinPassword.value = "";
+            mpShowView("join");
+            return;
+        }
+        btn.disabled = true;
+        const result = await mp.joinRoom(code);
+        btn.disabled = false;
         if (result.error) {
             alert(result.error);
             return;
@@ -254,15 +358,10 @@ document.addEventListener("DOMContentLoaded", () => {
         mpShowView("lobby");
     });
 
-    el.mpJoinOpenBtn.addEventListener("click", () => {
-        if (!auth.isLoggedIn) return;
-        el.mpJoinError.hidden = true;
-        el.mpJoinCode.value = "";
-        mpShowView("join");
-    });
-    el.mpJoinBackBtn.addEventListener("click", () => mpShowView("menu"));
+    // --- Join Room by code -------------------------------------------
+    el.mpJoinBackBtn.addEventListener("click", () => mpShowView("lobbylist"));
     el.mpJoinSubmitBtn.addEventListener("click", async () => {
-        const result = await mp.joinRoom(el.mpJoinCode.value);
+        const result = await mp.joinRoom(el.mpJoinCode.value, el.mpJoinPassword.value.trim() || null);
         if (result.error) {
             el.mpJoinError.textContent = result.error;
             el.mpJoinError.hidden = false;
@@ -278,16 +377,172 @@ document.addEventListener("DOMContentLoaded", () => {
         await mp.leaveRoom();
         mpShowView("menu");
     });
-    el.mpResultsLeaveBtn.addEventListener("click", async () => {
-        await mp.leaveRoom();
-        mpShowView("menu");
-    });
     el.mpStartBtn.addEventListener("click", async () => {
         const result = await mp.startGame();
         if (result.error) alert(result.error);
     });
 
-    let mpLocalState = { guesses: [], status: "playing" };
+    // --- Shared game screen adapter -------------------------------------
+    // Rather than maintaining a separate multiplayer grid/UI, multiplayer
+    // rounds are played on the exact same screen as Classic/Daily via
+    // ui.enterMultiplayerMode(adapter). The adapter exposes the same shape
+    // RainbowdleGame does (guesses/status/mysteryOperator/getAvailableHints/
+    // findOperatorByName) so every render path (grid, hex track, hints,
+    // end banner, share) works unmodified. Opponents' progress is shown in
+    // the left-hand mp-sidebar as rows of share-style emoji squares.
+    const ui = window.__rainbowdle && window.__rainbowdle.ui;
+    let mpGameEntered = false;
+    let mpHintValues = { secondaryGadgets: null, secondaryWeapons: null, primaryWeapons: null };
+
+    function findOperator(name) {
+        const n = (name || "").trim().toLowerCase();
+        return PLAYABLE_OPERATORS.find((op) => op.name.toLowerCase() === n) || null;
+    }
+
+    function fieldsToResults(fields) {
+        return (fields || []).map((f) => {
+            const schema = ATTRIBUTE_SCHEMA.find((a) => a.key === f.key);
+            return {
+                key: f.key,
+                label: schema ? schema.label : f.key,
+                type: schema ? schema.type : "equality",
+                state: f.state,
+                guessValue: f.guessValue,
+            };
+        });
+    }
+
+    const mpAdapter = {
+        mode: "multiplayer",
+        roomCode: "",
+        dateKey: null,
+        guesses: [],
+        guessedNames: new Set(),
+        status: "playing",
+        mysteryOperator: { name: "???", image: "pngs/recruit_blue.png" },
+        _roomId: null,
+        findOperatorByName: findOperator,
+        getAvailableHints() {
+            return HINT_SCHEDULE.map((entry) => {
+                const unlocked = this.guesses.length >= entry.afterGuesses;
+                return {
+                    ...entry,
+                    unlocked,
+                    values: unlocked ? mpHintValues[entry.field] || [] : [],
+                };
+            });
+        },
+    };
+
+    function mpResetAdapter() {
+        mpAdapter.roomCode = mp.room ? mp.room.code : "";
+        mpAdapter.guesses = [];
+        mpAdapter.guessedNames = new Set();
+        mpAdapter.status = "playing";
+        mpAdapter.mysteryOperator = { name: "???", image: "pngs/recruit_blue.png" };
+        mpAdapter._roomId = mp.room ? mp.room.id : null;
+        mpHintValues = { secondaryGadgets: null, secondaryWeapons: null, primaryWeapons: null };
+    }
+
+    function mpEnterGameScreen() {
+        if (!ui || !mp.room) return;
+        mpGameEntered = true;
+        // Only carry guesses over when re-entering the SAME room's round
+        // (e.g. reopening the multiplayer menu mid-round). A different
+        // room -- a brand new game after finishing/leaving one -- must
+        // always start from a clean slate, otherwise old guesses/duplicate
+        // names and a stale won/lost status leak in and block guessing.
+        if (mpAdapter._roomId !== mp.room.id) mpResetAdapter();
+        ui.onMultiplayerGuessSubmit = mpSubmitGuess;
+        ui.onMultiplayerLeaveRequested = mpLeaveFromGameScreen;
+        ui.enterMultiplayerMode(mpAdapter);
+        mpRenderSidebar(mp._snapshot());
+        mpStartPolling();
+    }
+
+    // Realtime pushes updates as soon as a guess/player row changes, but as
+    // a fallback (replication lag, a missed event) also poll for opponents'
+    // progress while a round is in play, so the sidebar never gets stuck.
+    let mpPollTimer = null;
+    function mpStartPolling() {
+        mpStopPolling();
+        mpPollTimer = setInterval(async () => {
+            if (!mpGameEntered || !mp.room) return;
+            await Promise.all([mp._refreshPlayers(), mp._refreshGuesses()]);
+            mpRenderSidebar(mp._snapshot());
+        }, 4000);
+    }
+    function mpStopPolling() {
+        if (mpPollTimer) {
+            clearInterval(mpPollTimer);
+            mpPollTimer = null;
+        }
+    }
+
+    async function mpSubmitGuess(operatorName) {
+        const result = await mp.submitGuess(operatorName);
+        if (result.error) {
+            ui.setMultiplayerGuessError(result.error);
+            return;
+        }
+        const data = result.data;
+        const operator = findOperator(data.operatorName);
+        mpAdapter.guesses.push({
+            operator,
+            results: fieldsToResults(data.fields),
+            isCorrect: data.isCorrect,
+        });
+        mpAdapter.guessedNames.add(data.operatorName);
+        if (data.hints) {
+            for (const key of Object.keys(mpHintValues)) {
+                if (data.hints[key] != null) mpHintValues[key] = data.hints[key];
+            }
+        }
+        if (data.isCorrect) {
+            mpAdapter.status = "won";
+            mpAdapter.mysteryOperator = operator || mpAdapter.mysteryOperator;
+        } else if (data.guessNumber >= 10) {
+            mpAdapter.status = "lost";
+            const revealed = data.mysteryOperatorName ? findOperator(data.mysteryOperatorName) : null;
+            mpAdapter.mysteryOperator = revealed || mpAdapter.mysteryOperator;
+        }
+        ui.renderMultiplayerGuessResult(data.isCorrect);
+
+        // Don't wait on realtime to reflect this in the sidebar -- pull the
+        // latest players/guesses straight away so your own card (and
+        // everyone else's, next time they poll) updates immediately.
+        await Promise.all([mp._refreshPlayers(), mp._refreshGuesses()]);
+        mpRenderSidebar(mp._snapshot());
+    }
+
+    async function mpLeaveFromGameScreen() {
+        mpStopPolling();
+        await mp.leaveRoom();
+        mpGameEntered = false;
+        mpResetAdapter();
+        ui.exitMultiplayerMode();
+    }
+
+    function mpRenderSidebar(snapshot) {
+        if (!ui || !snapshot.room) return;
+        const room = snapshot.room;
+        const statusText = room.status === "playing" ? "Round in progress…" : room.status === "lobby" ? "Waiting to start…" : "";
+        const players = snapshot.players.map((p) => {
+            const present = !snapshot.presentProfileIds || snapshot.presentProfileIds.size === 0 || snapshot.presentProfileIds.has(p.profile_id);
+            const guessRows = (snapshot.guessesByProfile[p.profile_id] || []).map((fields) => (fields || []).map((f) => f.state));
+            return {
+                username: p.username,
+                isMe: p.profile_id === mp.myProfileId,
+                isHost: p.profile_id === room.host_id,
+                offline: !present,
+                guessRows,
+                solved: p.solved,
+                finished: p.finished,
+                guessCount: p.guesses_count,
+            };
+        });
+        ui.renderMultiplayerSidebar({ statusText, players });
+    }
 
     function renderLobby(snapshot) {
         el.mpRoomCode.textContent = snapshot.room.code;
@@ -302,149 +557,24 @@ document.addEventListener("DOMContentLoaded", () => {
         el.mpLobbyStatus.textContent = snapshot.isHost ? "You are the host. Start when ready." : "Waiting for host…";
     }
 
-    function renderMpGrid() {
-        el.mpGridBody.innerHTML = "";
-        for (const g of mpLocalState.guesses) {
-            const nameCell = document.createElement("div");
-            nameCell.className = "cell cell--operator";
-            nameCell.textContent = g.operatorName;
-            el.mpGridBody.appendChild(nameCell);
-            for (const field of g.fields) {
-                const cell = document.createElement("div");
-                cell.className = `cell cell--${field.state}`;
-                const value = document.createElement("div");
-                value.className = "cell__value";
-                value.textContent = field.key === "speed" || field.key === "armor" ? "●".repeat(field.guessValue) : String(field.guessValue);
-                cell.appendChild(value);
-                el.mpGridBody.appendChild(cell);
-            }
-        }
-        el.mpGameProgress.textContent = `Guess ${mpLocalState.guesses.length} / 10`;
-    }
-
-    function renderMpHints() {
-        el.mpHintPanel.innerHTML = "";
-        const latest = mpLocalState.guesses[mpLocalState.guesses.length - 1];
-        if (!latest || !latest.hints) return;
-        const entries = [
-            ["secondaryGadgets", "Secondary Gadgets"],
-            ["secondaryWeapons", "Secondary Weapons"],
-            ["primaryWeapons", "Primary Weapons"],
-        ];
-        for (const [key, label] of entries) {
-            const values = latest.hints[key];
-            if (!values) continue;
-            const box = document.createElement("div");
-            box.className = "hint-box";
-            box.innerHTML = `<strong>${label}:</strong> ${values.length ? values.map(escapeHtml).join(", ") : "None"}`;
-            el.mpHintPanel.appendChild(box);
-        }
-    }
-
-    function mpAutocomplete(query) {
-        const q = query.trim().toLowerCase();
-        el.mpAutocompleteList.innerHTML = "";
-        if (!q) return;
-        const matches = PLAYABLE_OPERATORS.filter((op) => op.name.toLowerCase().includes(q)).slice(0, 8);
-        for (const op of matches) {
-            const item = document.createElement("div");
-            item.className = "autocomplete-item";
-            item.textContent = op.name;
-            item.addEventListener("click", () => {
-                el.mpOperatorSearch.value = op.name;
-                el.mpAutocompleteList.innerHTML = "";
-            });
-            el.mpAutocompleteList.appendChild(item);
-        }
-    }
-    el.mpOperatorSearch.addEventListener("input", () => mpAutocomplete(el.mpOperatorSearch.value));
-
-    async function mpSubmitGuess() {
-        const name = el.mpOperatorSearch.value.trim();
-        if (!name) return;
-        const found = PLAYABLE_OPERATORS.find((op) => op.name.toLowerCase() === name.toLowerCase());
-        if (!found) {
-            el.mpSearchFeedback.textContent = "Not a recognized operator.";
-            return;
-        }
-        const result = await mp.submitGuess(found.name);
-        if (result.error) {
-            el.mpSearchFeedback.textContent = result.error;
-            return;
-        }
-        el.mpSearchFeedback.textContent = "";
-        el.mpOperatorSearch.value = "";
-        el.mpAutocompleteList.innerHTML = "";
-        mpLocalState.guesses.push(result.data);
-        renderMpGrid();
-        renderMpHints();
-
-        if (result.data.isCorrect) {
-            el.mpEndBanner.textContent = `You solved it in ${result.data.guessNumber} guesses!`;
-            el.mpEndBanner.hidden = false;
-            el.mpGuessBtn.disabled = true;
-        } else if (result.data.guessNumber >= 10) {
-            el.mpEndBanner.textContent = `Out of guesses. The operator was ${result.data.mysteryOperatorName}.`;
-            el.mpEndBanner.hidden = false;
-            el.mpGuessBtn.disabled = true;
-        }
-    }
-    el.mpGuessBtn.addEventListener("click", mpSubmitGuess);
-    el.mpOperatorSearch.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            mpSubmitGuess();
-        }
-    });
-
-    function renderResults(snapshot) {
-        // Ranking and the operator reveal both come from the server
-        // (get_room_results), never computed or trusted client-side: the
-        // server only reveals the operator once every player has finished,
-        // and it ranks using its own recorded guess counts/solve times.
-        const results = snapshot.results;
-        const ranked = results ? results.players : snapshot.players;
-        const medals = ["🥇", "🥈", "🥉"];
-        el.mpResultsOperator.textContent = results && results.mysteryOperatorName
-            ? `The operator was ${results.mysteryOperatorName}.`
-            : "Waiting for everyone to finish before revealing the operator…";
-        el.mpResultsList.innerHTML = ranked
-            .map((p, i) => {
-                const medal = p.solved ? medals[i] || "" : "";
-                const line = p.solved ? `Solved in ${p.guesses_count} guesses` : p.finished ? "Did not solve it" : "Still playing…";
-                return `<div class="mp-result-row">${medal} <strong>${escapeHtml(p.username)}</strong><br/><span>${line}</span></div>`;
-            })
-            .join("");
-    }
-
     mp.onChange((snapshot) => {
         if (!snapshot.room) return;
 
         if (snapshot.room.status === "lobby") {
+            mpGameEntered = false;
             renderLobby(snapshot);
             if (el.multiplayerModal.classList.contains("is-open")) mpShowView("lobby");
         } else if (snapshot.room.status === "playing") {
-            if (el.mpViewGame.hidden && el.multiplayerModal.classList.contains("is-open")) {
-                mpLocalState = { guesses: [], status: "playing" };
-                el.mpEndBanner.hidden = true;
-                el.mpGuessBtn.disabled = false;
-                renderMpGrid();
-                mpShowView("game");
+            if (!mpGameEntered) {
+                closeModal(el.multiplayerModal);
+                mpEnterGameScreen();
             }
-
-            const me = snapshot.players.find((p) => p.profile_id === mp.myProfileId);
-            if (me && me.finished) {
-                // Re-ask the server for the ranked results/reveal any time the
-                // room's players change, so someone waiting on the results
-                // screen sees the operator get revealed the moment the last
-                // straggler finishes -- without ever computing that itself.
-                if (!snapshot.results || !snapshot.results.allFinished) {
-                    mp.refreshResults();
-                }
-                if (snapshot.results) renderResults(snapshot);
-                if (el.multiplayerModal.classList.contains("is-open")) mpShowView("results");
-            }
+            mpRenderSidebar(snapshot);
         } else if (snapshot.room.status === "closed") {
+            mpGameEntered = false;
+            mpStopPolling();
+            mpResetAdapter();
+            if (ui && ui.multiplayerActive) ui.exitMultiplayerMode();
             mpShowView("menu");
         }
     });

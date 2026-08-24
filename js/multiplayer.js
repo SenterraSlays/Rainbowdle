@@ -6,6 +6,7 @@ class RainbowdleMultiplayer {
         this.players = [];
         this.myGuesses = [];
         this.results = null; // { allFinished, mysteryOperatorName, players } from get_room_results
+        this.guessesByProfile = {}; // profile_id -> array of field_states arrays, in guess order
         this.channel = null;
         this.listeners = new Set();
         this._heartbeatTimer = null;
@@ -39,6 +40,7 @@ class RainbowdleMultiplayer {
             players: this.players,
             myGuesses: this.myGuesses,
             results: this.results,
+            guessesByProfile: this.guessesByProfile,
             presentProfileIds: new Set(Object.keys(this._presenceState)),
             isHost: !!(this.room && this.auth.session && this.room.host_id === this.auth.session.user.id),
         };
@@ -48,25 +50,37 @@ class RainbowdleMultiplayer {
         return this.auth.session ? this.auth.session.user.id : null;
     }
 
-    async createRoom(maxPlayers = 8) {
+    async createRoom(maxPlayers = 6, visibility = "public", password = null) {
         if (!this.client) return { error: "Online play is not configured yet." };
-        const { data, error } = await this.client.rpc("create_room", { p_max_players: maxPlayers });
+        const { data, error } = await this.client.rpc("create_room", {
+            p_max_players: maxPlayers,
+            p_visibility: visibility,
+            p_password: password || null,
+        });
         if (error) return { error: error.message };
         this.room = data;
         await this._afterJoin();
         return { data };
     }
 
-    async joinRoom(code) {
+    async listOpenRooms() {
+        if (!this.client) return { error: "Online play is not configured yet.", rows: [] };
+        const { data, error } = await this.client.rpc("list_open_rooms");
+        if (error) return { error: error.message, rows: [] };
+        return { rows: data || [] };
+    }
+
+    async joinRoom(code, password = null) {
         if (!this.client) return { error: "Online play is not configured yet." };
         const cleaned = (code || "").trim().toUpperCase();
         if (!cleaned) return { error: "Enter a room code." };
 
-        const { data, error } = await this.client.rpc("join_room", { p_code: cleaned });
+        const { data, error } = await this.client.rpc("join_room", { p_code: cleaned, p_password: password || null });
         if (error) {
             if (/not found/i.test(error.message)) return { error: "Room not found." };
             if (/full/i.test(error.message)) return { error: "This room is full." };
             if (/already started/i.test(error.message)) return { error: "This room already started." };
+            if (/incorrect password/i.test(error.message)) return { error: "Incorrect password." };
             return { error: error.message };
         }
         this.room = data;
@@ -77,9 +91,26 @@ class RainbowdleMultiplayer {
     async _afterJoin() {
         this.results = null;
         await this._refreshPlayers();
+        await this._refreshGuesses();
         this._subscribeRealtime();
         this._startHeartbeat();
         this._emit();
+    }
+
+    async _refreshGuesses() {
+        if (!this.room || !this.client) return;
+        const { data, error } = await this.client
+            .from("room_guesses")
+            .select("profile_id, field_states, guess_number")
+            .eq("room_id", this.room.id)
+            .order("guess_number", { ascending: true });
+        if (error) return;
+        const grouped = {};
+        for (const row of data || []) {
+            if (!grouped[row.profile_id]) grouped[row.profile_id] = [];
+            grouped[row.profile_id].push(row.field_states || []);
+        }
+        this.guessesByProfile = grouped;
     }
 
     async _refreshPlayers() {
@@ -124,6 +155,11 @@ class RainbowdleMultiplayer {
                     this.room = payload.new;
                     this._emit();
                 }
+            )
+            .on(
+                "postgres_changes",
+                { event: "*", schema: "public", table: "room_guesses", filter: `room_id=eq.${this.room.id}` },
+                () => this._refreshGuesses().then(() => this._emit())
             )
             .on("presence", { event: "sync" }, () => this._onPresenceSync())
             .on("presence", { event: "leave" }, ({ key }) => this._onPresenceLeave(key))

@@ -83,6 +83,17 @@
 
 <div class="app" id="app" hidden>
 
+    <aside class="mp-sidebar" id="mp-sidebar" hidden>
+        <div class="mp-sidebar__head">
+            <span class="mp-sidebar__room">Room <strong id="mp-sidebar-code">—</strong></span>
+            <button class="toolbar__btn mp-sidebar__leave-btn" id="mp-sidebar-leave-btn" type="button">Leave</button>
+        </div>
+        <p class="mp-sidebar__hint" id="mp-sidebar-status"></p>
+        <div class="mp-sidebar__players" id="mp-sidebar-players"></div>
+    </aside>
+
+    <div class="app__main" id="app-main">
+
     <header class="header">
         <div class="header__eyebrow" id="mode-eyebrow">Daily Operator Debrief · Prototype Build</div>
         <h1 class="header__title">RAINBOW<span>DLE</span></h1>
@@ -155,6 +166,8 @@
     </div>
 
     <button class="new-game-btn" id="new-game-btn" type="button" style="margin: 24px auto 0; display: block;">New Game</button>
+
+    </div>
 
 </div>
 
@@ -339,6 +352,16 @@
     </div>
 </div>
 
+<div class="modal" id="mp-leave-confirm-modal" role="dialog" aria-modal="true" aria-label="Confirm leave multiplayer" aria-hidden="true">
+    <div class="modal__panel modal__panel--small">
+        <p>Leave the multiplayer room? You won't be able to keep guessing in this round.</p>
+        <div class="confirm-box__actions">
+            <button class="secondary-btn" id="mp-leave-confirm-cancel" type="button">Cancel</button>
+            <button class="danger-btn" id="mp-leave-confirm-ok" type="button">Leave Room</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="auth-modal" role="dialog" aria-modal="true" aria-label="Account" aria-hidden="true">
     <div class="modal__panel">
         <div class="modal__header">
@@ -403,10 +426,61 @@
             </div>
         </div>
 
+        <div class="mp-view" id="mp-view-create" hidden>
+            <h3>Create Room</h3>
+            <div class="settings-row">
+                <label for="mp-create-max-players">Max Players</label>
+                <select id="mp-create-max-players">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6" selected>6</option>
+                </select>
+            </div>
+            <div class="mp-visibility-group" role="radiogroup" aria-label="Room visibility">
+                <label class="mp-visibility-option">
+                    <input type="radio" name="mp-create-visibility" value="public" checked />
+                    <span><strong>🌐 Public</strong><br /><small>Listed for anyone to browse and join.</small></span>
+                </label>
+                <label class="mp-visibility-option">
+                    <input type="radio" name="mp-create-visibility" value="private" />
+                    <span><strong>🔒 Private</strong><br /><small>Listed, but needs a password to join.</small></span>
+                </label>
+                <label class="mp-visibility-option">
+                    <input type="radio" name="mp-create-visibility" value="hidden" />
+                    <span><strong>🙈 Hidden</strong><br /><small>Not listed — joinable only with the room code.</small></span>
+                </label>
+            </div>
+            <div id="mp-create-password-row" hidden>
+                <label for="mp-create-password">Password</label>
+                <input type="text" id="mp-create-password" autocomplete="off" placeholder="Room password" maxlength="40" />
+            </div>
+            <p class="auth-error" id="mp-create-error" hidden></p>
+            <div class="mp-actions">
+                <button class="secondary-btn" id="mp-create-back-btn" type="button">Back</button>
+                <button class="guess-btn" id="mp-create-submit-btn" type="button">Create</button>
+            </div>
+        </div>
+
+        <div class="mp-view" id="mp-view-lobbylist" hidden>
+            <div class="mp-lobbylist__head">
+                <h3>Open Rooms</h3>
+                <button class="secondary-btn" id="mp-lobbylist-refresh-btn" type="button">🔁 Refresh</button>
+            </div>
+            <div class="mp-lobbylist" id="mp-lobbylist-body"></div>
+            <div class="mp-actions">
+                <button class="secondary-btn" id="mp-lobbylist-back-btn" type="button">Back</button>
+                <button class="guess-btn" id="mp-lobbylist-code-btn" type="button">Join by Code</button>
+            </div>
+        </div>
+
         <div class="mp-view" id="mp-view-join" hidden>
             <h3>Join Room</h3>
             <label for="mp-join-code">Room Code</label>
             <input type="text" id="mp-join-code" maxlength="6" autocomplete="off" placeholder="F7K9Q" />
+            <label for="mp-join-password">Password <span class="mp-optional-hint">(only if the room needs one)</span></label>
+            <input type="text" id="mp-join-password" autocomplete="off" placeholder="Leave blank if none" maxlength="40" />
             <p class="auth-error" id="mp-join-error" hidden></p>
             <div class="mp-actions">
                 <button class="secondary-btn" id="mp-join-back-btn" type="button">Back</button>
@@ -425,45 +499,6 @@
             </div>
         </div>
 
-        <div class="mp-view" id="mp-view-game" hidden>
-            <div class="mp-game-header">
-                <div id="mp-game-progress"></div>
-            </div>
-            <div class="search-panel">
-                <div class="search-row">
-                    <div class="search-input-wrap">
-                        <input type="text" id="mp-operator-search" autocomplete="off" spellcheck="false" placeholder="Search operator name…" />
-                        <div class="autocomplete-list" id="mp-autocomplete-list" role="listbox"></div>
-                    </div>
-                    <button class="guess-btn" id="mp-guess-btn" type="button">Guess</button>
-                </div>
-                <div class="search-feedback" id="mp-search-feedback"></div>
-            </div>
-            <section class="hint-panel" id="mp-hint-panel"></section>
-            <div class="grid-wrap">
-                <div class="guess-grid" id="mp-guess-grid">
-                    <div class="grid-header-cell">Operator</div>
-                    <div class="grid-header-cell">Gender</div>
-                    <div class="grid-header-cell">Role</div>
-                    <div class="grid-header-cell">Side</div>
-                    <div class="grid-header-cell">Speed</div>
-                    <div class="grid-header-cell">Armor</div>
-                    <div class="grid-header-cell">Year</div>
-                    <div id="mp-grid-body" class="guess-grid" style="display:contents;"></div>
-                </div>
-            </div>
-            <div class="end-banner" id="mp-end-banner"></div>
-        </div>
-
-        <div class="mp-view" id="mp-view-results" hidden>
-            <h3>🏆 Round Complete</h3>
-            <p id="mp-results-operator"></p>
-            <div id="mp-results-list" class="mp-results-list"></div>
-            <div class="mp-actions">
-                <button class="danger-btn" id="mp-results-leave-btn" type="button">Leave Room</button>
-                <button class="guess-btn" id="mp-results-again-btn" type="button" hidden>Back to Lobby</button>
-            </div>
-        </div>
     </div>
 </div>
 
@@ -474,11 +509,11 @@
 <script src="storage.js"></script>
 <script src="quiz.js"></script>
 <script src="ui.js"></script>
+<script src="script.js"></script>
 <script src="js/supabase.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/leaderboard.js"></script>
 <script src="js/multiplayer.js"></script>
 <script src="js/online-ui.js"></script>
-<script src="script.js"></script>
 </body>
 </html>

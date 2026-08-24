@@ -244,9 +244,16 @@ create policy "room players are readable by anyone signed in"
     on room_players for select
     using (auth.role() = 'authenticated');
 
-create policy "a player can read only their own room guesses"
+create policy "room members can read guesses in their room"
     on room_guesses for select
-    using (auth.uid() = profile_id);
+    using (
+        exists (
+            select 1 from room_players rp
+            where rp.room_id = room_guesses.room_id
+              and rp.profile_id = auth.uid()
+              and rp.left_at is null
+        )
+    );
 
 revoke insert, update, delete on profile_stats from authenticated;
 revoke insert, update, delete on game_results from authenticated;
@@ -366,7 +373,7 @@ create or replace function create_room(p_max_players int default 6, p_visibility
 returns rooms
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
     result rooms;
@@ -452,7 +459,7 @@ create or replace function join_room(p_code text, p_password text default null)
 returns rooms
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
     target rooms;

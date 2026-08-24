@@ -230,6 +230,9 @@ class RainbowdleUI {
     }
     _goHome() {
         if (this.multiplayerActive) {
+            if (!window.confirm("Leave this multiplayer room? You won't be able to rejoin this round.")) {
+                return;
+            }
             this._leaveMultiplayerGame();
             return;
         }

@@ -480,7 +480,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const snapshot = mp._snapshot();
             mpRenderSidebar(snapshot);
             renderRoundResults(snapshot);
-            mpMaybeScheduleRestart(snapshot);
         }, 4000);
     }
     function mpStopPolling() {
@@ -528,10 +527,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async function mpLeaveFromGameScreen() {
         mpStopPolling();
-        if (mpRestartTimer) {
-            clearTimeout(mpRestartTimer);
-            mpRestartTimer = null;
-        }
         await mp.leaveRoom();
         mpGameEntered = false;
         mpResetAdapter();
@@ -590,16 +585,12 @@ document.addEventListener("DOMContentLoaded", () => {
             })
             .join("");
         el.mpResultsNextHint.textContent = snapshot.isHost
-            ? "Starting a new round automatically, or start it now:"
+            ? "Everyone's finished — start the next round when ready:"
             : "Everyone's finished — waiting for the host to start the next round…";
         el.mpResultsRestartBtn.hidden = !snapshot.isHost;
     }
 
     async function mpTriggerRestartNow() {
-        if (mpRestartTimer) {
-            clearTimeout(mpRestartTimer);
-            mpRestartTimer = null;
-        }
         el.mpResultsRestartBtn.disabled = true;
         const result = await mp.startNewRound();
         el.mpResultsRestartBtn.disabled = false;
@@ -607,31 +598,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     el.mpResultsRestartBtn.addEventListener("click", mpTriggerRestartNow);
 
-    let mpRestartTimer = null;
-    function mpMaybeScheduleRestart(snapshot) {
-        const shouldSchedule = snapshot.isHost && snapshot.room && snapshot.room.status === "playing" && snapshot.results && snapshot.results.allFinished;
-        if (shouldSchedule) {
-            if (!mpRestartTimer) {
-                mpRestartTimer = setTimeout(async () => {
-                    mpRestartTimer = null;
-                    if (mp.room && mp.room.status === "playing") {
-                        const result = await mp.startNewRound();
-                        if (result.error) console.error("Rainbowdle auto-rematch failed", result.error);
-                    }
-                }, 3000);
-            }
-        } else if (mpRestartTimer) {
-            clearTimeout(mpRestartTimer);
-            mpRestartTimer = null;
-        }
-    }
-
     mp.onChange((snapshot) => {
         if (!snapshot.room) return;
 
         if (snapshot.room.status === "lobby") {
             mpGameEntered = false;
-            mpMaybeScheduleRestart(snapshot);
             renderLobby(snapshot);
             if (el.multiplayerModal.classList.contains("is-open")) mpShowView("lobby");
         } else if (snapshot.room.status === "playing") {
@@ -642,11 +613,9 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             mpRenderSidebar(snapshot);
             renderRoundResults(snapshot);
-            mpMaybeScheduleRestart(snapshot);
         } else if (snapshot.room.status === "closed") {
             mpGameEntered = false;
             mpStopPolling();
-            mpMaybeScheduleRestart({ ...snapshot, results: null });
             mpResetAdapter();
             if (ui && ui.multiplayerActive) ui.exitMultiplayerMode();
             mpShowView("menu");

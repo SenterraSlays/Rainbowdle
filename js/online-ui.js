@@ -79,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
         mpResultsReveal: document.getElementById("mp-results-reveal"),
         mpResultsList: document.getElementById("mp-results-list"),
         mpResultsNextHint: document.getElementById("mp-results-next-hint"),
+        mpResultsRestartBtn: document.getElementById("mp-results-restart-btn"),
     };
 
     function openModal(modal) {
@@ -577,6 +578,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!el.mpResults) return;
         if (!results || !results.allFinished) {
             el.mpResults.hidden = true;
+            el.mpResultsRestartBtn.hidden = true;
             return;
         }
         el.mpResults.hidden = false;
@@ -588,9 +590,22 @@ document.addEventListener("DOMContentLoaded", () => {
             })
             .join("");
         el.mpResultsNextHint.textContent = snapshot.isHost
-            ? "Everyone's finished — starting a new round…"
+            ? "Starting a new round automatically, or start it now:"
             : "Everyone's finished — waiting for the host to start the next round…";
+        el.mpResultsRestartBtn.hidden = !snapshot.isHost;
     }
+
+    async function mpTriggerRestartNow() {
+        if (mpRestartTimer) {
+            clearTimeout(mpRestartTimer);
+            mpRestartTimer = null;
+        }
+        el.mpResultsRestartBtn.disabled = true;
+        const result = await mp.startNewRound();
+        el.mpResultsRestartBtn.disabled = false;
+        if (result.error) alert(result.error);
+    }
+    el.mpResultsRestartBtn.addEventListener("click", mpTriggerRestartNow);
 
     let mpRestartTimer = null;
     function mpMaybeScheduleRestart(snapshot) {

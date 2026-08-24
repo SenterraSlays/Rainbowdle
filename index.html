@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+<title>Rainbowdle — Guess the Operator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="loading-screen" id="loading-screen">
+    <div class="loading-screen__mark">RAINBOW<span>DLE</span></div>
+    <div class="loading-screen__text">Loading Rainbowdle…</div>
+</div>
+
+<div class="sticky-header" id="sticky-header">
+    <button class="sticky-header__btn" id="sticky-home-btn" type="button" aria-label="Back to main menu">🏠</button>
+    <span class="sticky-header__title">RAINBOWDLE</span>
+    <span class="sticky-header__guesses">Guesses: <span id="sticky-guess-counter">0 / 10</span></span>
+    <button class="sticky-header__btn" id="sticky-operators-btn" type="button" aria-label="Open operator reference">👥</button>
+</div>
+
+<div class="menu" id="main-menu">
+    <div class="menu__inner">
+        <div class="menu__mark">RAINBOW<span>DLE</span></div>
+        <p class="menu__tagline">Identify the mystery Rainbow Six Siege operator</p>
+
+        <div class="menu__modes">
+            <button class="mode-card mode-card--classic" id="mode-classic-btn" type="button">
+                <span class="mode-card__icon">🎯</span>
+                <span class="mode-card__title">Classic</span>
+                <span class="mode-card__desc">Unlimited random rounds. 10 guesses, jump in whenever.</span>
+                <span class="mode-card__cta" id="mode-classic-cta">Play</span>
+            </button>
+            <button class="mode-card mode-card--daily" id="mode-daily-btn" type="button">
+                <span class="mode-card__icon">📅</span>
+                <span class="mode-card__title">Daily Challenge</span>
+                <span class="mode-card__desc">One mystery operator, same for everyone, resets at midnight.</span>
+                <span class="mode-card__cta" id="mode-daily-cta">Play</span>
+            </button>
+            <button class="mode-card mode-card--learn" id="mode-learn-btn" type="button">
+                <span class="mode-card__icon">🎓</span>
+                <span class="mode-card__title">Learning Mode</span>
+                <span class="mode-card__desc">Browse every operator's full loadout, stats, and role — no guessing.</span>
+                <span class="mode-card__cta">Study</span>
+            </button>
+        </div>
+
+        <div class="menu__streak" id="menu-daily-streak" hidden>
+            🔥 Daily streak: <strong id="menu-daily-streak-value">0</strong>
+        </div>
+
+        <div class="menu__modes menu__modes--online">
+            <button class="mode-card mode-card--multiplayer" id="mode-multiplayer-btn" type="button">
+                <span class="mode-card__icon">🎮</span>
+                <span class="mode-card__title">Multiplayer</span>
+                <span class="mode-card__desc">Create or join a room and race friends on the same operator.</span>
+                <span class="mode-card__cta">Play</span>
+            </button>
+            <button class="mode-card mode-card--leaderboard" id="mode-leaderboard-btn" type="button">
+                <span class="mode-card__icon">🏆</span>
+                <span class="mode-card__title">Leaderboard</span>
+                <span class="mode-card__desc">See how your wins and average guesses stack up globally.</span>
+                <span class="mode-card__cta">View</span>
+            </button>
+        </div>
+
+        <div class="menu__account" id="menu-account-area">
+            <button class="toolbar__btn" id="menu-login-btn" type="button">👤 Login</button>
+        </div>
+
+        <div class="menu__footer">
+            <button class="toolbar__btn" id="menu-operators-btn" type="button">👥 Operators</button>
+            <button class="toolbar__btn" id="menu-stats-btn" type="button">📊 Stats</button>
+            <button class="toolbar__btn" id="menu-settings-btn" type="button">⚙ Settings</button>
+            <button class="toolbar__btn" id="menu-howto-btn" type="button">❔ How to Play</button>
+        </div>
+    </div>
+</div>
+
+<div class="app" id="app" hidden>
+
+    <header class="header">
+        <div class="header__eyebrow" id="mode-eyebrow">Daily Operator Debrief · Prototype Build</div>
+        <h1 class="header__title">RAINBOW<span>DLE</span></h1>
+        <p class="header__subtitle">Identify the mystery Rainbow Six Siege operator in 10 guesses</p>
+        <div class="header__rule"></div>
+    </header>
+
+    <div class="toolbar">
+        <button class="toolbar__btn" id="home-btn" type="button">🏠 Menu</button>
+        <button class="toolbar__btn" id="operators-btn" type="button">👥 Operators</button>
+        <button class="toolbar__btn" id="stats-btn" type="button">📊 Stats</button>
+        <button class="toolbar__btn" id="settings-btn" type="button">⚙ Settings</button>
+    </div>
+
+    <div class="status-bar">
+        <span class="status-bar__label">Guesses</span>
+        <div class="hex-track" id="hex-track" aria-hidden="true"></div>
+        <span class="guess-counter" id="guess-counter">0 / 10</span>
+        <button class="new-game-btn" id="new-game-btn-top" type="button">New Game</button>
+    </div>
+
+    <div class="search-panel">
+        <div class="search-row">
+            <div class="search-input-wrap">
+                <input
+                    type="text"
+                    id="operator-search"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Search operator name…"
+                    aria-label="Search for an operator"
+                    role="combobox"
+                    aria-expanded="false"
+                    aria-autocomplete="list"
+                    aria-controls="autocomplete-list"
+                />
+                <div class="autocomplete-list" id="autocomplete-list" role="listbox"></div>
+            </div>
+            <button class="guess-btn" id="guess-btn" type="button">Guess</button>
+        </div>
+        <div class="search-feedback" id="search-feedback" role="status" aria-live="polite"></div>
+    </div>
+
+    <section class="hint-panel" id="hint-panel" aria-label="Hints"></section>
+
+    <div class="grid-wrap">
+        <div class="guess-grid" id="guess-grid">
+            <div class="grid-header-cell">Operator</div>
+            <div class="grid-header-cell">Gender</div>
+            <div class="grid-header-cell">Role</div>
+            <div class="grid-header-cell">Side</div>
+            <div class="grid-header-cell" title="Operator speed rating">Speed</div>
+            <div class="grid-header-cell" title="Operator armor rating">Armor</div>
+            <div class="grid-header-cell">Year</div>
+            <div id="grid-body" class="guess-grid" style="display:contents;"></div>
+        </div>
+        <p class="grid-empty-hint" id="grid-empty-hint">Make your first guess to start filling in the debrief.</p>
+    </div>
+
+    <div class="end-banner" id="end-banner"></div>
+    <div class="end-actions">
+        <button class="share-btn" id="share-btn" type="button" hidden>📋 Share Result</button>
+    </div>
+
+    <div class="legend" aria-hidden="true">
+        <span class="legend__item"><span class="legend__swatch legend__swatch--match"></span> ✓ Match</span>
+        <span class="legend__item"><span class="legend__swatch legend__swatch--mismatch"></span> ✕ No match</span>
+        <span class="legend__item"><span class="legend__swatch legend__swatch--higher"></span>&#8593; Mystery is higher</span>
+        <span class="legend__item"><span class="legend__swatch legend__swatch--lower"></span>&#8595; Mystery is lower</span>
+    </div>
+
+    <button class="new-game-btn" id="new-game-btn" type="button" style="margin: 24px auto 0; display: block;">New Game</button>
+
+</div>
+
+<div class="modal" id="operators-modal" role="dialog" aria-modal="true" aria-label="Operator reference" aria-hidden="true">
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__header">
+            <h2>Operator Reference</h2>
+            <button class="modal__close" id="operators-close" type="button" aria-label="Close operator reference">✕</button>
+        </div>
+        <input type="text" id="operators-search" class="modal__search" placeholder="Search operators…" aria-label="Search operators" />
+        <div class="filter-bar">
+            <button class="toolbar__btn filter-toggle-btn" id="operators-filter-btn" type="button" aria-expanded="false" aria-controls="operators-filter-panel">🔎 Filter</button>
+            <span class="filter-bar__count" id="operators-filter-count"></span>
+        </div>
+        <div class="filter-panel" id="operators-filter-panel" hidden></div>
+        <div class="operators-grid" id="operators-grid"></div>
+    </div>
+</div>
+
+<div class="learn-screen" id="learn-screen" hidden>
+    <div class="learn-screen__header">
+        <button class="toolbar__btn" id="learn-home-btn" type="button">🏠 Menu</button>
+        <div class="learn-screen__heading">
+            <h1>Operator Academy</h1>
+            <p id="learn-screen-tagline">Every operator, every loadout — filter, search, and study.</p>
+        </div>
+        <div class="learn-tabs" role="tablist" aria-label="Learning mode view">
+            <button class="learn-tab is-active" id="learn-tab-reference" type="button" role="tab" aria-selected="true">📖 Reference</button>
+            <button class="learn-tab" id="learn-tab-quiz" type="button" role="tab" aria-selected="false">🧠 Quiz</button>
+        </div>
+    </div>
+
+    <div class="learn-layout">
+        <aside class="learn-rail learn-rail--left">
+            <div class="learn-rail__section" id="learn-search-section">
+                <span class="learn-rail__title">Search</span>
+                <div class="search-input-wrap learn-rail__search">
+                    <input type="text" id="learn-search" autocomplete="off" spellcheck="false" placeholder="Search operator name…" aria-label="Search operators" />
+                </div>
+            </div>
+
+            <div class="learn-rail__section">
+                <div class="filter-bar">
+                    <button class="toolbar__btn filter-toggle-btn" id="learn-filter-btn" type="button" aria-expanded="false" aria-controls="learn-filter-panel">🔎 Filter</button>
+                    <span class="filter-bar__count" id="learn-filter-count"></span>
+                </div>
+                <div class="filter-panel" id="learn-filter-panel" hidden></div>
+            </div>
+
+            <div class="learn-rail__section" id="quiz-settings" hidden>
+                <span class="learn-rail__title">Quiz Categories</span>
+                <div class="quiz-categories" id="quiz-categories"></div>
+                <p class="quiz-settings__pool" id="quiz-pool-count"></p>
+                <button class="secondary-btn" id="quiz-restart-btn" type="button">🔁 Restart Session</button>
+                <p class="quiz-settings__hint">Tip: press <kbd>1</kbd>–<kbd>4</kbd> to answer, <kbd>Enter</kbd> for the next question.</p>
+            </div>
+        </aside>
+
+        <main class="learn-main">
+            <div class="learn-grid" id="learn-grid"></div>
+
+            <div class="quiz-panel" id="quiz-panel" hidden>
+                <div class="quiz-card" id="quiz-card">
+                    <div class="quiz-card__prompt" id="quiz-prompt">Q: —</div>
+                    <div class="quiz-card__options" id="quiz-options"></div>
+                    <div class="quiz-card__feedback" id="quiz-feedback" role="status" aria-live="polite"></div>
+                    <div class="quiz-card__actions">
+                        <button class="new-game-btn" id="quiz-next-btn" type="button" hidden>Next Question →</button>
+                    </div>
+                </div>
+                <p class="quiz-empty" id="quiz-empty" hidden>Not enough operators match your filters/categories to build a fair question. Try widening your filters or enabling more categories.</p>
+            </div>
+        </main>
+
+        <aside class="learn-rail learn-rail--right" id="quiz-stats-rail" hidden>
+            <span class="learn-rail__title">Session</span>
+            <div class="quiz-stat-grid">
+                <div class="quiz-stat"><span class="quiz-stat__value" id="quiz-stat-score">0</span><span class="quiz-stat__label">Correct</span></div>
+                <div class="quiz-stat"><span class="quiz-stat__value" id="quiz-stat-total">0</span><span class="quiz-stat__label">Answered</span></div>
+                <div class="quiz-stat"><span class="quiz-stat__value" id="quiz-stat-streak">0</span><span class="quiz-stat__label">Streak</span></div>
+                <div class="quiz-stat"><span class="quiz-stat__value" id="quiz-stat-best">0</span><span class="quiz-stat__label">Best Streak</span></div>
+            </div>
+            <span class="learn-rail__title">Recent Questions</span>
+            <ol class="quiz-history" id="quiz-history"></ol>
+        </aside>
+    </div>
+</div>
+
+<div class="modal" id="share-modal" role="dialog" aria-modal="true" aria-label="Share result" aria-hidden="true">
+    <div class="modal__panel modal__panel--small">
+        <div class="modal__header">
+            <h2>Share Result</h2>
+            <button class="modal__close" id="share-close" type="button" aria-label="Close share">✕</button>
+        </div>
+        <div class="share-card" id="share-card">
+            <div class="share-card__title">RAINBOWDLE</div>
+            <div class="share-card__result" id="share-card-result"></div>
+            <div class="share-card__grid" id="share-card-grid"></div>
+        </div>
+        <div class="share-actions">
+            <button class="new-game-btn" id="share-copy-btn" type="button">📋 Copy to Clipboard</button>
+            <button class="secondary-btn" id="share-native-btn" type="button" hidden>📤 Share</button>
+        </div>
+        <textarea class="share-fallback" id="share-fallback" readonly hidden aria-label="Copy your Rainbowdle result"></textarea>
+    </div>
+</div>
+
+<div class="modal" id="howto-modal" role="dialog" aria-modal="true" aria-label="How to play" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2>How to Play</h2>
+            <button class="modal__close" id="howto-close" type="button" aria-label="Close how to play">✕</button>
+        </div>
+        <div class="howto-body">
+            <p>Guess the mystery Rainbow Six Siege operator in 10 tries. After every guess, each attribute is scored against the mystery operator:</p>
+            <ul class="howto-list">
+                <li><span class="legend__swatch legend__swatch--match"></span> Exact match</li>
+                <li><span class="legend__swatch legend__swatch--mismatch"></span> No match</li>
+                <li><span class="legend__swatch legend__swatch--higher"></span> Mystery operator's value is higher</li>
+                <li><span class="legend__swatch legend__swatch--lower"></span> Mystery operator's value is lower</li>
+            </ul>
+            <p>Extra hints — gadgets, secondary weapon, and primary weapon — unlock automatically as you use up guesses. <strong>Classic</strong> mode is unlimited random rounds; <strong>Daily Challenge</strong> gives everyone the same operator once per day and tracks your streak.</p>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="stats-modal" role="dialog" aria-modal="true" aria-label="Statistics" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2>Statistics</h2>
+            <button class="modal__close" id="stats-close" type="button" aria-label="Close statistics">✕</button>
+        </div>
+        <div id="stats-body" class="stats-body"></div>
+        <button class="danger-btn" id="stats-reset-btn" type="button">Reset Statistics</button>
+        <div class="confirm-box" id="stats-reset-confirm" hidden>
+            <p><strong>Are you sure?</strong></p>
+            <p>This will permanently delete your Rainbowdle statistics.</p>
+            <div class="confirm-box__actions">
+                <button class="secondary-btn" id="stats-reset-cancel" type="button">Cancel</button>
+                <button class="danger-btn" id="stats-reset-confirm-btn" type="button">Reset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="settings-modal" role="dialog" aria-modal="true" aria-label="Settings" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2>Settings</h2>
+            <button class="modal__close" id="settings-close" type="button" aria-label="Close settings">✕</button>
+        </div>
+        <div class="settings-row">
+            <label for="setting-sound">🔊 Sound Effects</label>
+            <input type="checkbox" id="setting-sound" />
+        </div>
+        <div class="settings-row">
+            <label for="setting-animations">Animations</label>
+            <input type="checkbox" id="setting-animations" />
+        </div>
+        <div class="settings-row">
+            <label for="setting-theme">Theme</label>
+            <select id="setting-theme">
+                <option value="system">System</option>
+                <option value="dark">Dark (Amber)</option>
+                <option value="light">Light</option>
+                <option value="midnight">Midnight (Blue)</option>
+                <option value="ember">Ember (Red)</option>
+                <option value="jungle">Jungle (Green)</option>
+                <option value="contrast">High Contrast</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="new-game-confirm-modal" role="dialog" aria-modal="true" aria-label="Confirm new game" aria-hidden="true">
+    <div class="modal__panel modal__panel--small">
+        <p>Are you sure you want to start a new game? Your current progress will be lost.</p>
+        <div class="confirm-box__actions">
+            <button class="secondary-btn" id="new-game-confirm-cancel" type="button">Cancel</button>
+            <button class="danger-btn" id="new-game-confirm-ok" type="button">New Game</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="auth-modal" role="dialog" aria-modal="true" aria-label="Account" aria-hidden="true">
+    <div class="modal__panel">
+        <div class="modal__header">
+            <h2 id="auth-modal-title">Login</h2>
+            <button class="modal__close" id="auth-close" type="button" aria-label="Close account">✕</button>
+        </div>
+        <div class="auth-body" id="auth-body">
+            <div class="auth-tabs">
+                <button class="auth-tab is-active" id="auth-tab-login" type="button">Login</button>
+                <button class="auth-tab" id="auth-tab-signup" type="button">Create Account</button>
+            </div>
+            <form id="auth-form" class="auth-form">
+                <label for="auth-email">Email</label>
+                <input type="email" id="auth-email" autocomplete="email" required />
+                <label for="auth-password">Password</label>
+                <input type="password" id="auth-password" autocomplete="current-password" required minlength="6" />
+                <p class="auth-error" id="auth-error" hidden></p>
+                <button class="guess-btn" id="auth-submit" type="submit">Login</button>
+            </form>
+        </div>
+        <div class="auth-body" id="username-body" hidden>
+            <p>Choose a username to finish creating your account.</p>
+            <form id="username-form" class="auth-form">
+                <label for="username-input">Username</label>
+                <input type="text" id="username-input" minlength="3" maxlength="20" required />
+                <p class="auth-hint">3–20 characters: letters, numbers, underscores, or hyphens.</p>
+                <p class="auth-error" id="username-error" hidden></p>
+                <button class="guess-btn" id="username-submit" type="submit">Create Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="leaderboard-modal" role="dialog" aria-modal="true" aria-label="Leaderboard" aria-hidden="true">
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__header">
+            <h2>🏆 Rainbowdle Leaderboard</h2>
+            <button class="modal__close" id="leaderboard-close" type="button" aria-label="Close leaderboard">✕</button>
+        </div>
+        <div id="leaderboard-body" class="leaderboard-body"></div>
+    </div>
+</div>
+
+<div class="modal" id="multiplayer-modal" role="dialog" aria-modal="true" aria-label="Multiplayer" aria-hidden="true">
+    <div class="modal__panel modal__panel--wide">
+        <div class="modal__header">
+            <h2 id="multiplayer-title">Multiplayer</h2>
+            <button class="modal__close" id="multiplayer-close" type="button" aria-label="Close multiplayer">✕</button>
+        </div>
+
+        <div class="mp-view" id="mp-view-menu">
+            <p class="mp-signed-out-hint" id="mp-signed-out-hint" hidden>You need an account to play multiplayer.</p>
+            <div class="mp-menu-actions">
+                <button class="mode-card" id="mp-create-btn" type="button">
+                    <span class="mode-card__icon">➕</span>
+                    <span class="mode-card__title">Create Room</span>
+                </button>
+                <button class="mode-card" id="mp-join-open-btn" type="button">
+                    <span class="mode-card__icon">🔑</span>
+                    <span class="mode-card__title">Join Room</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="mp-view" id="mp-view-join" hidden>
+            <h3>Join Room</h3>
+            <label for="mp-join-code">Room Code</label>
+            <input type="text" id="mp-join-code" maxlength="6" autocomplete="off" placeholder="F7K9Q" />
+            <p class="auth-error" id="mp-join-error" hidden></p>
+            <div class="mp-actions">
+                <button class="secondary-btn" id="mp-join-back-btn" type="button">Back</button>
+                <button class="guess-btn" id="mp-join-submit-btn" type="button">Join</button>
+            </div>
+        </div>
+
+        <div class="mp-view" id="mp-view-lobby" hidden>
+            <h3>ROOM: <span id="mp-room-code"></span></h3>
+            <button class="secondary-btn" id="mp-copy-code-btn" type="button">Copy Code</button>
+            <div class="mp-players" id="mp-players-list"></div>
+            <p id="mp-lobby-status">Waiting for host…</p>
+            <div class="mp-actions">
+                <button class="danger-btn" id="mp-leave-btn" type="button">Leave Room</button>
+                <button class="guess-btn" id="mp-start-btn" type="button" hidden>Start Game</button>
+            </div>
+        </div>
+
+        <div class="mp-view" id="mp-view-game" hidden>
+            <div class="mp-game-header">
+                <div id="mp-game-progress"></div>
+            </div>
+            <div class="search-panel">
+                <div class="search-row">
+                    <div class="search-input-wrap">
+                        <input type="text" id="mp-operator-search" autocomplete="off" spellcheck="false" placeholder="Search operator name…" />
+                        <div class="autocomplete-list" id="mp-autocomplete-list" role="listbox"></div>
+                    </div>
+                    <button class="guess-btn" id="mp-guess-btn" type="button">Guess</button>
+                </div>
+                <div class="search-feedback" id="mp-search-feedback"></div>
+            </div>
+            <section class="hint-panel" id="mp-hint-panel"></section>
+            <div class="grid-wrap">
+                <div class="guess-grid" id="mp-guess-grid">
+                    <div class="grid-header-cell">Operator</div>
+                    <div class="grid-header-cell">Gender</div>
+                    <div class="grid-header-cell">Role</div>
+                    <div class="grid-header-cell">Side</div>
+                    <div class="grid-header-cell">Speed</div>
+                    <div class="grid-header-cell">Armor</div>
+                    <div class="grid-header-cell">Year</div>
+                    <div id="mp-grid-body" class="guess-grid" style="display:contents;"></div>
+                </div>
+            </div>
+            <div class="end-banner" id="mp-end-banner"></div>
+        </div>
+
+        <div class="mp-view" id="mp-view-results" hidden>
+            <h3>🏆 Round Complete</h3>
+            <p id="mp-results-operator"></p>
+            <div id="mp-results-list" class="mp-results-list"></div>
+            <div class="mp-actions">
+                <button class="danger-btn" id="mp-results-leave-btn" type="button">Leave Room</button>
+                <button class="guess-btn" id="mp-results-again-btn" type="button" hidden>Back to Lobby</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="operators.js"></script>
+<script src="comparison.js"></script>
+<script src="game.js"></script>
+<script src="storage.js"></script>
+<script src="quiz.js"></script>
+<script src="ui.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/leaderboard.js"></script>
+<script src="js/multiplayer.js"></script>
+<script src="js/online-ui.js"></script>
+<script src="script.js"></script>
+</body>
+</html>

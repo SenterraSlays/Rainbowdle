@@ -5,8 +5,17 @@ class RainbowdleMultiplayer {
         this.room = null;
         this.players = [];
         this.myGuesses = [];
+        this.results = null; // { allFinished, mysteryOperatorName, players } from get_room_results
         this.channel = null;
         this.listeners = new Set();
+        this._heartbeatTimer = null;
+        this._presenceState = {};
+
+        window.addEventListener("beforeunload", () => {
+            // Best-effort only: browsers don't guarantee async work on unload.
+            // Real disconnect handling happens via Realtime Presence below.
+            if (this.channel) this.client?.removeChannel(this.channel);
+        });
     }
 
     onChange(callback) {
@@ -29,6 +38,8 @@ class RainbowdleMultiplayer {
             room: this.room,
             players: this.players,
             myGuesses: this.myGuesses,
+            results: this.results,
+            presentProfileIds: new Set(Object.keys(this._presenceState)),
             isHost: !!(this.room && this.auth.session && this.room.host_id === this.auth.session.user.id),
         };
     }
@@ -64,8 +75,10 @@ class RainbowdleMultiplayer {
     }
 
     async _afterJoin() {
+        this.results = null;
         await this._refreshPlayers();
         this._subscribeRealtime();
+        this._startHeartbeat();
         this._emit();
     }
 
@@ -73,7 +86,7 @@ class RainbowdleMultiplayer {
         if (!this.room) return;
         const { data, error } = await this.client
             .from("room_players")
-            .select("profile_id, username, guesses_count, solved, finished, joined_at, left_at")
+            .select("profile_id, username, guesses_count, solved, solved_at, finished, joined_at, left_at")
             .eq("room_id", this.room.id)
             .is("left_at", null)
             .order("joined_at", { ascending: true });
@@ -96,7 +109,9 @@ class RainbowdleMultiplayer {
         }
 
         this.channel = this.client
-            .channel(`room-${this.room.id}`)
+            .channel(`room-${this.room.id}`, {
+                config: { presence: { key: this.myProfileId || undefined } },
+            })
             .on(
                 "postgres_changes",
                 { event: "*", schema: "public", table: "room_players", filter: `room_id=eq.${this.room.id}` },
@@ -110,7 +125,54 @@ class RainbowdleMultiplayer {
                     this._emit();
                 }
             )
-            .subscribe();
+            .on("presence", { event: "sync" }, () => this._onPresenceSync())
+            .on("presence", { event: "leave" }, ({ key }) => this._onPresenceLeave(key))
+            .subscribe(async (status) => {
+                if (status === "SUBSCRIBED" && this.myProfileId) {
+                    const me = this.players.find((p) => p.profile_id === this.myProfileId);
+                    await this.channel.track({
+                        profile_id: this.myProfileId,
+                        username: me ? me.username : "",
+                    });
+                }
+            });
+    }
+
+    _onPresenceSync() {
+        if (!this.channel) return;
+        this._presenceState = this.channel.presenceState();
+        this._emit();
+    }
+
+    async _onPresenceLeave(key) {
+        // key is the profile_id that just disconnected (see presence config above).
+        if (!this.room || !key) return;
+        if (this.room.host_id === key) {
+            // Any remaining client can request this -- the database re-verifies
+            // membership and picks the next host itself, so this can't be abused.
+            const { data } = await this.client.rpc("transfer_host_if_absent", {
+                p_room_id: this.room.id,
+                p_absent_profile_id: key,
+            });
+            if (data) this.room = data;
+            this._emit();
+        }
+    }
+
+    _startHeartbeat() {
+        this._stopHeartbeat();
+        this._heartbeatTimer = setInterval(() => {
+            if (this.room && this.client) {
+                this.client.rpc("mp_heartbeat", { p_room_id: this.room.id }).catch(() => {});
+            }
+        }, 20000);
+    }
+
+    _stopHeartbeat() {
+        if (this._heartbeatTimer) {
+            clearInterval(this._heartbeatTimer);
+            this._heartbeatTimer = null;
+        }
     }
 
     async startGame() {
@@ -132,13 +194,24 @@ class RainbowdleMultiplayer {
         this.myGuesses.push(data);
         if (data.guessNumber >= 10 || data.isCorrect) {
             await this.client.rpc("mp_record_result", { p_room_id: this.room.id });
+            await this.refreshResults();
         }
         this._emit();
         return { data };
     }
 
+    async refreshResults() {
+        if (!this.room || !this.client) return null;
+        const { data, error } = await this.client.rpc("get_room_results", { p_room_id: this.room.id });
+        if (error) return null;
+        this.results = data;
+        this._emit();
+        return data;
+    }
+
     async leaveRoom() {
         if (!this.room || !this.client) return;
+        this._stopHeartbeat();
         await this.client.rpc("leave_room", { p_room_id: this.room.id });
         if (this.channel) {
             this.client.removeChannel(this.channel);
@@ -147,6 +220,8 @@ class RainbowdleMultiplayer {
         this.room = null;
         this.players = [];
         this.myGuesses = [];
+        this.results = null;
+        this._presenceState = {};
         this._emit();
     }
 

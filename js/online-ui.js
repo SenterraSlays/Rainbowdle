@@ -292,7 +292,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderLobby(snapshot) {
         el.mpRoomCode.textContent = snapshot.room.code;
         el.mpPlayersList.innerHTML = snapshot.players
-            .map((p) => `<div class="mp-player-row">🟢 ${escapeHtml(p.username)}${p.profile_id === snapshot.room.host_id ? " (host)" : ""}</div>`)
+            .map((p) => {
+                const present = !snapshot.presentProfileIds || snapshot.presentProfileIds.size === 0 || snapshot.presentProfileIds.has(p.profile_id);
+                const dot = present ? "🟢" : "⚪";
+                return `<div class="mp-player-row">${dot} ${escapeHtml(p.username)}${p.profile_id === snapshot.room.host_id ? " (host)" : ""}</div>`;
+            })
             .join("");
         el.mpStartBtn.hidden = !snapshot.isHost;
         el.mpLobbyStatus.textContent = snapshot.isHost ? "You are the host. Start when ready." : "Waiting for host…";
@@ -394,18 +398,19 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     function renderResults(snapshot) {
-        const sorted = [...snapshot.players].sort((a, b) => {
-            if (a.solved !== b.solved) return a.solved ? -1 : 1;
-            if (a.solved && b.solved) return a.guesses_count - b.guesses_count;
-            return 0;
-        });
+        // Ranking and the operator reveal both come from the server
+        // (get_room_results), never computed or trusted client-side: the
+        // server only reveals the operator once every player has finished,
+        // and it ranks using its own recorded guess counts/solve times.
+        const results = snapshot.results;
+        const ranked = results ? results.players : snapshot.players;
         const medals = ["🥇", "🥈", "🥉"];
-        el.mpResultsOperator.textContent = snapshot.room.mystery_operator_name
-            ? `The operator was ${snapshot.room.mystery_operator_name}.`
-            : "";
-        el.mpResultsList.innerHTML = sorted
+        el.mpResultsOperator.textContent = results && results.mysteryOperatorName
+            ? `The operator was ${results.mysteryOperatorName}.`
+            : "Waiting for everyone to finish before revealing the operator…";
+        el.mpResultsList.innerHTML = ranked
             .map((p, i) => {
-                const medal = medals[i] || "";
+                const medal = p.solved ? medals[i] || "" : "";
                 const line = p.solved ? `Solved in ${p.guesses_count} guesses` : p.finished ? "Did not solve it" : "Still playing…";
                 return `<div class="mp-result-row">${medal} <strong>${escapeHtml(p.username)}</strong><br/><span>${line}</span></div>`;
             })
@@ -428,9 +433,15 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const me = snapshot.players.find((p) => p.profile_id === mp.myProfileId);
-            const everyoneFinished = snapshot.players.length > 0 && snapshot.players.every((p) => p.finished);
-            if (everyoneFinished || (me && me.finished)) {
-                renderResults(snapshot);
+            if (me && me.finished) {
+                // Re-ask the server for the ranked results/reveal any time the
+                // room's players change, so someone waiting on the results
+                // screen sees the operator get revealed the moment the last
+                // straggler finishes -- without ever computing that itself.
+                if (!snapshot.results || !snapshot.results.allFinished) {
+                    mp.refreshResults();
+                }
+                if (snapshot.results) renderResults(snapshot);
                 if (el.multiplayerModal.classList.contains("is-open")) mpShowView("results");
             }
         } else if (snapshot.room.status === "closed") {

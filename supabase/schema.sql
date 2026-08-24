@@ -126,13 +126,26 @@ create table rooms (
     host_id uuid not null references profiles (id) on delete cascade,
     status text not null default 'lobby',
     max_players int not null default 8,
-    mystery_operator_name text references operators (name),
     round_started_at timestamptz,
     created_at timestamptz not null default now(),
     last_activity_at timestamptz not null default now()
 );
 
 create unique index rooms_code_active_idx on rooms (code) where status <> 'closed';
+
+-- The mystery operator is stored SEPARATELY from `rooms` on purpose.
+-- `rooms` has realtime enabled and is directly selectable by room members,
+-- so anything in that table (including values inside realtime payloads)
+-- is visible to every client in the room. room_secrets has NO select
+-- policies at all (RLS default-denies everyone, including the players in
+-- the room) -- it can only be read from inside SECURITY DEFINER functions,
+-- which run with elevated privileges and bypass RLS. This is what stops a
+-- player from opening devtools and reading the answer out of a network
+-- response or the realtime socket.
+create table room_secrets (
+    room_id uuid primary key references rooms (id) on delete cascade,
+    mystery_operator_name text not null references operators (name)
+);
 
 create table room_players (
     room_id uuid not null references rooms (id) on delete cascade,
@@ -169,6 +182,12 @@ alter table rooms enable row level security;
 alter table room_players enable row level security;
 alter table room_guesses enable row level security;
 alter table operators enable row level security;
+alter table room_secrets enable row level security;
+-- Deliberately no policies on room_secrets: with RLS enabled and zero
+-- policies, every role (including authenticated) is denied select/insert/
+-- update/delete. Only SECURITY DEFINER functions owned by the table owner
+-- can read or write it.
+revoke all on room_secrets from authenticated, anon;
 
 create policy "operators are publicly readable"
     on operators for select
@@ -352,9 +371,12 @@ begin
 
     select name into picked_operator from operators order by random() limit 1;
 
-    insert into rooms (code, host_id, max_players, mystery_operator_name)
-    values (new_code, auth.uid(), p_max_players, picked_operator)
+    insert into rooms (code, host_id, max_players)
+    values (new_code, auth.uid(), p_max_players)
     returning * into result;
+
+    insert into room_secrets (room_id, mystery_operator_name)
+    values (result.id, picked_operator);
 
     insert into room_players (room_id, profile_id, username)
     select result.id, auth.uid(), username from profiles where id = auth.uid();
@@ -523,7 +545,10 @@ begin
         raise exception 'unknown operator';
     end if;
 
-    select * into mystery from operators where name = room.mystery_operator_name;
+    select o.* into mystery
+    from room_secrets rs
+    join operators o on o.name = rs.mystery_operator_name
+    where rs.room_id = p_room_id;
 
     is_correct := guess.name = mystery.name;
     next_guess_number := player.guesses_count + 1;
@@ -607,6 +632,134 @@ $$;
 
 grant execute on function mp_record_result(uuid) to authenticated;
 
+create or replace function get_room_results(p_room_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    all_finished boolean;
+    reveal text;
+    players jsonb;
+begin
+    if auth.uid() is null then
+        raise exception 'not authenticated';
+    end if;
+
+    if not exists (
+        select 1 from room_players
+        where room_id = p_room_id and profile_id = auth.uid()
+    ) then
+        raise exception 'not in this room';
+    end if;
+
+    select bool_and(finished) into all_finished
+    from room_players
+    where room_id = p_room_id and left_at is null;
+
+    if all_finished then
+        select mystery_operator_name into reveal from room_secrets where room_id = p_room_id;
+    else
+        reveal := null;
+    end if;
+
+    select coalesce(jsonb_agg(row_to_json(ranked) order by ranked.rank_order), '[]'::jsonb)
+    into players
+    from (
+        select
+            profile_id,
+            username,
+            solved,
+            finished,
+            guesses_count,
+            solved_at,
+            row_number() over (
+                order by
+                    solved desc,
+                    guesses_count asc,
+                    solved_at asc nulls last
+            ) as rank_order
+        from room_players
+        where room_id = p_room_id and left_at is null
+    ) ranked;
+
+    return jsonb_build_object(
+        'allFinished', coalesce(all_finished, false),
+        'mysteryOperatorName', reveal,
+        'players', players
+    );
+end;
+$$;
+
+grant execute on function get_room_results(uuid) to authenticated;
+
+create or replace function mp_heartbeat(p_room_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+    update rooms set last_activity_at = now()
+    where id = p_room_id
+    and exists (
+        select 1 from room_players
+        where room_id = p_room_id and profile_id = auth.uid() and left_at is null
+    );
+$$;
+
+grant execute on function mp_heartbeat(uuid) to authenticated;
+
+-- Called by any client still connected to the room when it notices (via
+-- Realtime Presence) that the current host's presence is gone. Re-checking
+-- room membership server-side means a non-member can't hijack a room, and
+-- picking "earliest remaining joined_at" server-side means a player can't
+-- just declare themselves host.
+create or replace function transfer_host_if_absent(p_room_id uuid, p_absent_profile_id uuid)
+returns rooms
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    result rooms;
+    new_host uuid;
+begin
+    if auth.uid() is null then
+        raise exception 'not authenticated';
+    end if;
+
+    if not exists (
+        select 1 from room_players
+        where room_id = p_room_id and profile_id = auth.uid() and left_at is null
+    ) then
+        raise exception 'not in this room';
+    end if;
+
+    if not exists (select 1 from rooms where id = p_room_id and host_id = p_absent_profile_id) then
+        select * into result from rooms where id = p_room_id;
+        return result;
+    end if;
+
+    select profile_id into new_host from room_players
+    where room_id = p_room_id and left_at is null and profile_id <> p_absent_profile_id
+    order by joined_at asc limit 1;
+
+    if new_host is null then
+        select * into result from rooms where id = p_room_id;
+        return result;
+    end if;
+
+    update rooms set host_id = new_host, last_activity_at = now()
+    where id = p_room_id
+    returning * into result;
+
+    return result;
+end;
+$$;
+
+grant execute on function transfer_host_if_absent(uuid, uuid) to authenticated;
+
 create or replace function cleanup_stale_rooms()
 returns void
 language sql
@@ -618,6 +771,25 @@ as $$
 $$;
 
 grant execute on function cleanup_stale_rooms() to authenticated;
+
+-- Best-effort scheduled cleanup. pg_cron is available on all Supabase
+-- plans (Database -> Extensions -> pg_cron). If it's not enabled this
+-- block is skipped with a notice instead of failing the whole script, so
+-- you can still run this file before turning pg_cron on and re-run this
+-- part later -- see the README/setup steps for the manual alternative.
+do $$
+begin
+    if exists (select 1 from pg_extension where extname = 'pg_cron') then
+        perform cron.schedule(
+            'rainbowdle-cleanup-stale-rooms',
+            '*/15 * * * *',
+            $cron$select public.cleanup_stale_rooms();$cron$
+        );
+    else
+        raise notice 'pg_cron extension is not enabled; skipping automatic schedule. Enable it in Database > Extensions, then re-run just this DO block, or call cleanup_stale_rooms() from a scheduled Edge Function instead.';
+    end if;
+end;
+$$;
 
 alter publication supabase_realtime add table rooms;
 alter publication supabase_realtime add table room_players;

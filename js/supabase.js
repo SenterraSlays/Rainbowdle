@@ -1,5 +1,10 @@
-const SUPABASE_URL = "https://YOUR-PROJECT-ref.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "YOUR-PUBLIC-ANON-OR-PUBLISHABLE-KEY";
+// Project ref "hdpqouhgwsalczprxblo" taken from your dashboard URL
+// (https://supabase.com/dashboard/project/hdpqouhgwsalczprxblo) -- the
+// dashboard link itself is NOT the API URL, so it's rewritten to the
+// actual API host below. Double-check both values against
+// Settings > Data API in your Supabase dashboard (see README).
+const SUPABASE_URL = "https://hdpqouhgwsalczprxblo.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_EL6yIuHw20dGbXrCmZMWjA_FkAC_bbw";
 
 let supabaseClient = null;
 
